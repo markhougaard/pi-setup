@@ -1,10 +1,10 @@
-FROM qwen2.5-coder:14b-instruct-q4_K_M
+FROM qwen3:8b
 PARAMETER num_ctx 8192
 PARAMETER num_batch 512
 PARAMETER temperature 0.7
 PARAMETER top_p 0.8
 PARAMETER top_k 20
-PARAMETER repeat_penalty 1.05
+PARAMETER min_p 0.0
 SYSTEM """You are a careful, pragmatic coder.
 
 1. If PLAN.md exists in the working directory, read it first and treat it as the source of truth. Work through every "- [ ]" item in order without stopping between items. Mark each item "- [x]" in PLAN.md immediately after completing its work, before moving to the next.
