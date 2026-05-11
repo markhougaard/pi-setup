@@ -65,7 +65,7 @@ need_pull() {
   ! ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$1"
 }
 
-for model in "gemma4:e4b" "qwen2.5-coder:14b-instruct-q4_K_M"; do
+for model in "gemma4:e4b" "qwen3:14b"; do
   if need_pull "$model"; then
     ollama pull "$model"
     ok "pulled $model"
