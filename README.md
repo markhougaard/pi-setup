@@ -114,7 +114,7 @@ Verify:
 
 ```bash
 pi --list-models | grep llama-cpp
-# → llama-cpp  ggml-org/gpt-oss-20b-GGUF   16.4K   8K   yes   no
+# → llama-cpp  ggml-org/gpt-oss-20b-GGUF   49.2K   8K   yes   no
 ```
 
 ### 6. End-to-end test
@@ -130,10 +130,22 @@ returns the line, tool-calls are working through the full Harmony round-trip.
 
 ## Tuning notes
 
-- **Context window**: pinned to **16384** in both `llama-server` (`--ctx-size`) and the
-  pi extension (`contextWindow`). The model's native ctx is 131072, but the KV cache for
-  that would exceed available RAM after the weights are loaded. 16K is plenty for any
-  single-turn coding task.
+- **Context window**: set to **49152** (48K) in both `llama-server` (`--ctx-size`) and
+  the pi extension (`contextWindow`). The model's native ctx is 131072; 64K is the
+  absolute most that fits alongside the ~14 GB of weights on a 16 GB machine, so 48K is
+  the chosen setting — it leaves a RAM cushion while still being 3× the old 16K. Getting
+  past 16K took three RAM-freeing levers (below) — without them, large contexts spill
+  layers to CPU (~4 tok/s) or swap. Verified at **~40 tok/s** with all layers on GPU.
+- **Why 64K fits — the levers** (all in the LaunchAgent args):
+  - `--parallel 1`: pi runs a single conversation, so one KV slot, not the auto-selected
+    four. (Default is `-1` = auto = 4 on this box.)
+  - `--cache-type-k q8_0 --cache-type-v q8_0` + `-fa on`: 8-bit KV cache (needs Flash
+    Attention) roughly halves KV bytes/token with negligible quality loss.
+  - `--cache-ram 0`: disables the 8 GB prompt-reuse cache that `llama-server` reserves by
+    default — pure RAM the model can't afford here. Costs cross-call prompt reuse (cold
+    prompts re-process), worth it for the headroom.
+  - Bonus: gpt-oss-20b uses **sliding-window attention** (128-token window on alternating
+    layers), so KV grows far slower than a dense model — 64K is cheaper than it looks.
 - **GPU layers**: `-ngl 99` tells `llama-server` to put all layers on GPU. With the
   sysctl bump from step 3, they all fit.
 - **Harmony / reasoning**: `--jinja` is the magic flag that enables gpt-oss's Harmony
