@@ -1,0 +1,9 @@
+{
+  "lastChangelogVersion": "0.74.0",
+  "defaultProvider": "llama-cpp",
+  "defaultModel": "ggml-org/gpt-oss-20b-GGUF",
+  "defaultThinkingLevel": "medium",
+  "pi-subagent": {
+    "extensions": ["~/.pi/agent/extensions/ollama.ts"]
+  }
+}
