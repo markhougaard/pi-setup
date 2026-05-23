@@ -114,7 +114,7 @@ Verify:
 
 ```bash
 pi --list-models | grep llama-cpp
-# → llama-cpp  ggml-org/gpt-oss-20b-GGUF   49.2K   8K   yes   no
+# → llama-cpp  ggml-org/gpt-oss-20b-GGUF   32.8K   8K   yes   no
 ```
 
 ### 6. End-to-end test
@@ -130,22 +130,32 @@ returns the line, tool-calls are working through the full Harmony round-trip.
 
 ## Tuning notes
 
-- **Context window**: set to **49152** (48K) in both `llama-server` (`--ctx-size`) and
-  the pi extension (`contextWindow`). The model's native ctx is 131072; 64K is the
-  absolute most that fits alongside the ~14 GB of weights on a 16 GB machine, so 48K is
-  the chosen setting — it leaves a RAM cushion while still being 3× the old 16K. Getting
-  past 16K took three RAM-freeing levers (below) — without them, large contexts spill
-  layers to CPU (~4 tok/s) or swap. Verified at **~40 tok/s** with all layers on GPU.
-- **Why 64K fits — the levers** (all in the LaunchAgent args):
+- **Context window**: set to **32768** (32K) in both `llama-server` (`--ctx-size`) and
+  the pi extension (`contextWindow`). This is tuned for **multi-turn agent use**, not the
+  largest possible single prompt — see the SWA note below for why that distinction drives
+  the whole config. Verified holding a 26K-token context with no spill and no OOM.
+- **`--swa-full` — the setting that makes agent sessions usable.** gpt-oss-20b uses
+  sliding-window attention (128-token window on alternating layers). By default
+  `llama-server` only keeps that 128-token window of KV for SWA layers, which means it
+  **cannot reuse the KV cache across turns** — every agent turn re-processes the entire
+  growing conversation from scratch (the log says `forcing full prompt re-processing due
+  to lack of cache data`). On a multi-turn coding session that compounds into minutes per
+  turn. `--swa-full` keeps the full-length KV on every layer so the prefix is reused: in
+  testing, a follow-up turn dropped from a full re-prefill to **0.4 s**. The cost is
+  roughly double the KV memory, which is why the context comes down from 48K to 32K to
+  stay inside 16 GB. **Trade-off:** if your workload is one big single-shot prompt rather
+  than a conversation, drop `--swa-full` and raise `--ctx-size` back toward 48K instead.
+- **The other RAM-freeing levers** (all in the LaunchAgent args):
   - `--parallel 1`: pi runs a single conversation, so one KV slot, not the auto-selected
     four. (Default is `-1` = auto = 4 on this box.)
   - `--cache-type-k q8_0 --cache-type-v q8_0` + `-fa on`: 8-bit KV cache (needs Flash
     Attention) roughly halves KV bytes/token with negligible quality loss.
+  - `--batch-size 1024`: caps the prefill compute buffer. The default (2048) can blow past
+    the Metal memory budget and crash with `Compute error` (GPU OOM) once the context is
+    large; 1024 trades a little prefill speed for stability.
   - `--cache-ram 0`: disables the 8 GB prompt-reuse cache that `llama-server` reserves by
-    default — pure RAM the model can't afford here. Costs cross-call prompt reuse (cold
-    prompts re-process), worth it for the headroom.
-  - Bonus: gpt-oss-20b uses **sliding-window attention** (128-token window on alternating
-    layers), so KV grows far slower than a dense model — 64K is cheaper than it looks.
+    default — pure RAM the model can't afford here. (Cross-turn reuse comes from
+    `--swa-full` + the live slot, not this disk/RAM prompt cache.)
 - **GPU layers**: `-ngl 99` tells `llama-server` to put all layers on GPU. With the
   sysctl bump from step 3, they all fit.
 - **Harmony / reasoning**: `--jinja` is the magic flag that enables gpt-oss's Harmony

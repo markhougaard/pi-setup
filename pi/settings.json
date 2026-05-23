@@ -1,9 +1,31 @@
 {
-  "lastChangelogVersion": "0.74.0",
+  "lastChangelogVersion": "0.75.5",
   "defaultProvider": "llama-cpp",
   "defaultModel": "ggml-org/gpt-oss-20b-GGUF",
   "defaultThinkingLevel": "medium",
+  "observational-memory": {
+    "observationThresholdTokens": 4000,
+    "compactionThresholdTokens": 24000,
+    "reflectionThresholdTokens": 16000,
+    "observerMaxTurnsPerRun": 6,
+    "thinkingLevel": "low",
+    "passive": false
+  },
+  "compaction": {
+    "keepRecentTokens": 10000
+  },
   "pi-subagent": {
-    "extensions": ["~/.pi/agent/extensions/ollama.ts"]
-  }
+    "extensions": [
+      "~/.pi/agent/extensions/llama-cpp.ts"
+    ]
+  },
+  "packages": [
+    "npm:pi-observational-memory",
+    "npm:pi-web-access",
+    "npm:pi-subagents",
+    "npm:pi-mcp-adapter",
+    "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:@juicesharp/rpiv-todo",
+    "npm:pi-simplify"
+  ]
 }

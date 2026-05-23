@@ -11,7 +11,7 @@
 		<string>ggml-org/gpt-oss-20b-GGUF</string>
 		<string>--jinja</string>
 		<string>--ctx-size</string>
-		<string>49152</string>
+		<string>32768</string>
 		<string>--parallel</string>
 		<string>1</string>
 		<string>--cache-type-k</string>
@@ -20,6 +20,9 @@
 		<string>q8_0</string>
 		<string>-fa</string>
 		<string>on</string>
+		<string>--swa-full</string>
+		<string>--batch-size</string>
+		<string>1024</string>
 		<string>--cache-ram</string>
 		<string>0</string>
 		<string>--host</string>
