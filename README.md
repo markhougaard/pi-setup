@@ -131,20 +131,24 @@ returns the line, tool-calls are working through the full Harmony round-trip.
 ## Tuning notes
 
 - **Context window**: set to **32768** (32K) in both `llama-server` (`--ctx-size`) and
-  the pi extension (`contextWindow`). This is tuned for **multi-turn agent use**, not the
-  largest possible single prompt — see the SWA note below for why that distinction drives
-  the whole config. Verified holding a 26K-token context with no spill and no OOM.
-- **`--swa-full` — the setting that makes agent sessions usable.** gpt-oss-20b uses
-  sliding-window attention (128-token window on alternating layers). By default
-  `llama-server` only keeps that 128-token window of KV for SWA layers, which means it
-  **cannot reuse the KV cache across turns** — every agent turn re-processes the entire
-  growing conversation from scratch (the log says `forcing full prompt re-processing due
-  to lack of cache data`). On a multi-turn coding session that compounds into minutes per
-  turn. `--swa-full` keeps the full-length KV on every layer so the prefix is reused: in
-  testing, a follow-up turn dropped from a full re-prefill to **0.4 s**. The cost is
-  roughly double the KV memory, which is why the context comes down from 48K to 32K to
-  stay inside 16 GB. **Trade-off:** if your workload is one big single-shot prompt rather
-  than a conversation, drop `--swa-full` and raise `--ctx-size` back toward 48K instead.
+  the pi extension (`contextWindow`). Verified holding a 26K-token context with no spill
+  and no OOM.
+- **`--swa-full` is *not* set — headroom beats prefix reuse on 16 GB.** gpt-oss-20b uses
+  sliding-window attention (128-token window on alternating layers). `--swa-full` would
+  keep full-length KV on every layer so the cross-turn prefix is reused (sub-second
+  follow-up prefills instead of a full re-process), but it roughly doubles KV memory. On
+  a 16 GB box with `iogpu.wired_limit_mb=14336`, that extra KV is the difference between
+  the rest of the machine being usable while a turn runs and not. Without it, every agent
+  turn re-prefills the growing conversation (`llama-server` logs `forcing full prompt
+  re-processing due to lack of cache data`), which is the cost we're paying for keeping
+  ~2 GB more free for the OS. **Trade-off:** on a 32 GB+ machine, or if you mostly do
+  single-shot prompts where prefill speed doesn't matter, add `--swa-full` back.
+- **Process priority — keep the foreground responsive during generation.** The
+  LaunchAgent runs `llama-server` with `ProcessType=Adaptive`, `Nice=5`, and
+  `LowPriorityIO=true`. That tells macOS to yield CPU and disk I/O to whatever you're
+  actively using when there's contention, so typing/scrolling stays smooth while a turn is
+  being generated. No effect on idle memory pressure (the GPU wiring is what it is), but
+  it removes the "everything stutters mid-response" symptom.
 - **The other RAM-freeing levers** (all in the LaunchAgent args):
   - `--parallel 1`: pi runs a single conversation, so one KV slot, not the auto-selected
     four. (Default is `-1` = auto = 4 on this box.)
@@ -154,8 +158,8 @@ returns the line, tool-calls are working through the full Harmony round-trip.
     the Metal memory budget and crash with `Compute error` (GPU OOM) once the context is
     large; 1024 trades a little prefill speed for stability.
   - `--cache-ram 0`: disables the 8 GB prompt-reuse cache that `llama-server` reserves by
-    default — pure RAM the model can't afford here. (Cross-turn reuse comes from
-    `--swa-full` + the live slot, not this disk/RAM prompt cache.)
+    default — pure RAM the model can't afford here. (With `--swa-full` off, we don't get
+    cross-turn KV reuse anyway, so this cache wouldn't help either.)
 - **GPU layers**: `-ngl 99` tells `llama-server` to put all layers on GPU. With the
   sysctl bump from step 3, they all fit.
 - **Harmony / reasoning**: `--jinja` is the magic flag that enables gpt-oss's Harmony
