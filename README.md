@@ -160,12 +160,16 @@ returns the line, tool-calls are working through the full Harmony round-trip.
     four. (Default is `-1` = auto = 4 on this box.)
   - `--cache-type-k q8_0 --cache-type-v q8_0` + `-fa on`: 8-bit KV cache (needs Flash
     Attention) roughly halves KV bytes/token with negligible quality loss.
-  - `--batch-size 1024`: caps the prefill compute buffer. The default (2048) can blow past
-    the Metal memory budget and crash with `Compute error` (GPU OOM) once the context is
-    large; 1024 trades a little prefill speed for stability.
+  - `--batch-size 1024`: caps the prefill compute buffer. The default (2048) blows past
+    the Metal memory budget and crashes with `Compute error` (GPU OOM) on large prefills —
+    every historical OOM in `server.log` shows `n_batch = 2048`. 1024 trades a little
+    prefill speed for stability, and it holds: **verified (2026-06-03) prefilling a full
+    31,516-token context — the entire 32K window — with zero OOM** (`bin/ctx-stress`).
+    Over-window prompts get a clean HTTP 400 `exceed_context_size_error`, not a crash.
   - `--cache-ram 0`: disables the 8 GB prompt-reuse cache that `llama-server` reserves by
-    default — pure RAM the model can't afford here. (With `--swa-full` off, we don't get
-    cross-turn KV reuse anyway, so this cache wouldn't help either.)
+    default — pure RAM the model can't afford here. This does *not* cost us cross-turn
+    reuse: the prefix reuse we rely on comes from warm-slot prefix matching / SWA context
+    checkpoints (see the `--swa-full` note above), a separate mechanism from this cache.
 - **GPU layers**: `-ngl 99` tells `llama-server` to put all layers on GPU. With the
   sysctl bump from step 3, they all fit.
 - **Harmony / reasoning**: `--jinja` is the magic flag that enables gpt-oss's Harmony
@@ -304,6 +308,7 @@ bin/
   llm-swap                                    # switch the active model + pi defaultModel
   ab-eval                                     # run eval/prompts through the served model
   prefill-probe                               # verify cross-turn prefix reuse (prefill tokens)
+  ctx-stress                                  # find the GPU-OOM ceiling (full-window prefill)
 eval/
   prompts/                                    # one .txt per eval task
   results/<model>/                            # timed pi --print outputs per model

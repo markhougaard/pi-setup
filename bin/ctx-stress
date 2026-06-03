@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""ctx-stress — find the GPU-OOM ceiling of the local llama-server.
+
+Sends progressively larger single-prompt requests (cold, unique content so each
+is a full prefill) and reports, per size: the real context token count, how many
+tokens were prefilled, wall time, and whether llama-server logged a Metal OOM
+(`Compute error` / `Insufficient Memory`). Prompts larger than --ctx-size are
+expected to return a clean HTTP 400 `exceed_context_size_error` — that is a
+rejection, not a crash. A real crash shows oom_lines>0 and a KeepAlive restart.
+
+Use it to confirm --batch-size is low enough that a full-window prefill doesn't
+blow the Metal budget, e.g. after a llama.cpp upgrade or a context-size change.
+
+Usage: bin/ctx-stress         (server must be up on https://127.0.0.1:8080)
+"""
+import json, os, re, ssl, time, urllib.request, urllib.error
+
+LOG = os.path.expanduser("~/.llama-cpp/logs/server.log")
+BASE = "https://127.0.0.1:8080"
+CTX = ssl._create_unverified_context()  # local mkcert self-signed cert
+SIZES = [8000, 16000, 24000, 30000]     # target tokens (actual ~2x via tokenizer)
+
+
+def served_model():
+    r = urllib.request.urlopen(BASE + "/v1/models", context=CTX, timeout=30)
+    return json.loads(r.read())["data"][0]["id"]
+
+
+def healthy():
+    try:
+        urllib.request.urlopen(BASE + "/health", context=CTX, timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+def wait_health(n=120):
+    for _ in range(n):
+        if healthy():
+            return True
+        time.sleep(2)
+    return False
+
+
+def scan_since(pos):
+    with open(LOG, "rb") as f:
+        f.seek(pos)
+        s = f.read().decode("utf-8", "replace")
+    oom = len(re.findall(r"OutOfMemory|Insufficient Memory|Compute error", s))
+    pe = re.findall(r"prompt eval time =\s*[\d.]+ ms /\s*(\d+) tokens", s)
+    return oom, (int(pe[-1]) if pe else None)
+
+
+def chat(model, content, max_tokens=8):
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": content}],
+                       "max_tokens": max_tokens, "temperature": 0, "stream": False}).encode()
+    req = urllib.request.Request(BASE + "/v1/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, context=CTX, timeout=900).read())
+
+
+def main():
+    model = served_model()
+    print(f"served model: {model}")
+    for target in SIZES:
+        uniq = str(time.time())
+        big = "\n".join(f"{i}. stress-{uniq} filler line tok {i} alpha beta gamma"
+                        for i in range(target // 11))
+        prompt = big + "\n\nReply with the single word OK."
+        pos = os.path.getsize(LOG)
+        t0 = time.time()
+        try:
+            r = chat(model, prompt)
+            oom, pe = scan_since(pos)
+            used = r["usage"]["prompt_tokens"]
+            status = "CRASH(OOM)" if oom else "ok"
+            print(f"target~{target:>6} | ctx={used:>6} | prefilled={pe} | "
+                  f"{time.time()-t0:5.1f}s | oom_lines={oom} | {status}")
+        except urllib.error.HTTPError as e:
+            oom, _ = scan_since(pos)
+            kind = "rejected (over-ctx)" if e.code == 400 and not oom else f"HTTP {e.code}"
+            print(f"target~{target:>6} | {kind} | oom_lines={oom}")
+        except Exception as e:
+            oom, _ = scan_since(pos)
+            print(f"target~{target:>6} | REQUEST FAILED: {type(e).__name__} | oom_lines={oom}")
+            print("   waiting for KeepAlive restart…")
+            print("   server back up" if wait_health() else "   server DID NOT recover")
+    print("done")
+
+
+if __name__ == "__main__":
+    main()
