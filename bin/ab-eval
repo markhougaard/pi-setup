@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# ab-eval — run every prompt in eval/prompts/ through whichever model is currently
+# served on :8080 (via pi --print) and save timed outputs under eval/results/<model>/.
+#
+# Usage: flip the model with `llm-swap gemma|gpt-oss`, then run `ab-eval`.
+# Run once per model, then diff the result dirs.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# pi/Node must trust the mkcert CA the TLS llama-server presents (this shell may
+# predate the launchd setenv, so set it explicitly).
+export NODE_EXTRA_CA_CERTS="${NODE_EXTRA_CA_CERTS:-$HOME/Library/Application Support/mkcert/rootCA.pem}"
+
+SERVED=$(curl -fsSk https://127.0.0.1:8080/v1/models \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])')
+SLUG=$(printf '%s' "$SERVED" | sed 's#[/:]#_#g')
+OUTDIR="eval/results/$SLUG"
+mkdir -p "$OUTDIR"
+echo "served model : $SERVED"
+echo "results dir  : $OUTDIR"
+
+for p in eval/prompts/*.txt; do
+  name=$(basename "$p" .txt)
+  printf '\n== %s ==\n' "$name"
+  start=$(date +%s)
+  if pi --print "$(cat "$p")" >"$OUTDIR/$name.out" 2>"$OUTDIR/$name.err"; then
+    status="ok"
+  else
+    status="EXIT $?"
+  fi
+  secs=$(( $(date +%s) - start ))
+  printf '%s' "$secs" >"$OUTDIR/$name.seconds"
+  bytes=$(wc -c <"$OUTDIR/$name.out" | tr -d ' ')
+  printf '   %s in %ss (%s bytes) -> %s.out\n' "$status" "$secs" "$bytes" "$OUTDIR/$name"
+done
+printf '\ndone: %s\n' "$SERVED"

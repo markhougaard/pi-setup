@@ -251,6 +251,40 @@ the pick on this box.
   It runs `launchctl setenv NODE_EXTRA_CA_CERTS <mkcert rootCA>`. Already-open
   terminals need a restart to inherit it; `curl` still needs `-k` either way.
 
+## Quality eval (`bin/ab-eval`)
+
+Speed and tool-call success don't tell you whose *output* is better. `bin/ab-eval`
+runs every prompt in `eval/prompts/` through whichever model is currently served (via
+`pi --print`) and saves timed outputs under `eval/results/<model>/`. To add a model to
+the comparison:
+
+```bash
+llm-swap <model>     # or point :8080 at any OpenAI-compatible server
+bin/ab-eval          # writes eval/results/<served-model-id>/
+```
+
+Then diff the result dirs. The harness is model-agnostic — it keys results off whatever
+`/v1/models` reports, so the table below grows by one row per model you run.
+
+**Current task** (`eval/prompts/subagent-extension.txt`): write a single-file Pi
+extension registering a `subagent` tool that delegates to a fresh `pi --print` child
+process — grounded in the real `registerTool`/`ToolDefinition` API so it tests actual
+knowledge, not plausible guessing. What to score: does it compile, does it return the
+subagent's output, is the `spawn` safe, does it honour the `AbortSignal`.
+
+### Results (M1 Pro / 16 GB, 2026-06-03)
+
+| Model | Time | Compiles? | Returns subagent output? | Safe spawn? | Notes |
+|---|---|---|---|---|---|
+| **gpt-oss-20b** | **141 s** | ✅ | ✅ | ✅ (no shell) | correct imports, honours abort + cleans up listener; nits: guesses `--system-prompt`, merges stderr |
+| Gemma 4 12B (UD-Q4_K_XL) | 291 s | ❌ ×2 | ❌ | ⚠️ `shell:true`+quotes | hallucinated import `@earendil-works/pi-sdk`; `ReferenceError` on undefined `Params`; returns static `"completed successfully"` and discards stdout; wrapped output in ``` fences |
+
+**Verdict so far:** on a real, API-grounded coding task gpt-oss-20b was ~2× faster *and*
+produced working code; Gemma 4 12B produced code that won't compile and wouldn't do the
+job if it did. Consistent with the speed/architecture analysis above — gpt-oss-20b is the
+pick for planning/thinking/code on this box. Re-run this eval against future local models
+(Qwen3 coder variants, new gpt-oss revisions, etc.) by adding a row.
+
 ## Layout
 
 ```
@@ -262,6 +296,10 @@ launchagents/
   com.markhougaard.node-ca-env.plist         # publishes NODE_EXTRA_CA_CERTS (mkcert CA) for pi/Node
 bin/
   llm-swap                                    # switch the active model + pi defaultModel
+  ab-eval                                     # run eval/prompts through the served model
+eval/
+  prompts/                                    # one .txt per eval task
+  results/<model>/                            # timed pi --print outputs per model
 pi/
   extensions/
     llama-cpp.ts                              # registers llama-cpp provider (both models)

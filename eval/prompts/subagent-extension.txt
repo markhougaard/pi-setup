@@ -1,0 +1,32 @@
+You are writing a single-file extension for the Pi coding agent (pi.dev) in TypeScript. A Pi extension default-exports an async factory:
+
+    export default async function (pi: ExtensionAPI) { /* ... */ }
+
+Relevant API (parameter schemas use TypeBox from "@sinclair/typebox"):
+
+    pi.registerTool<TParams extends TSchema>(tool: ToolDefinition<TParams>): void
+
+    interface ToolDefinition<TParams> {
+      name: string;
+      description: string;
+      parameters: TParams;            // a TypeBox object schema, e.g. Type.Object({ ... })
+      execute(
+        toolCallId: string,
+        params: Static<TParams>,
+        signal: AbortSignal | undefined,
+        onUpdate: ((details: unknown) => void) | undefined,
+        ctx: ExtensionContext,
+      ): Promise<AgentToolResult>;     // AgentToolResult = { content: string; isError?: boolean }
+    }
+
+Task: Write an extension file `subagents.ts` that registers a tool named `subagent` which delegates a task to a fresh, isolated Pi instance and returns its result to the calling agent.
+
+Requirements:
+- parameters: a required `task` (string — the instruction for the subagent) and an optional `systemPrompt` (string).
+- execute(): spawn a child process running the Pi CLI in non-interactive mode (`pi --print "<task>"`) using Node's child_process. If `systemPrompt` is given, pass it via an appropriate Pi system-prompt flag, or otherwise prepend it to the task. Capture stdout and return it as the tool result content.
+- Honor the AbortSignal: if the caller aborts, kill the child process and return an error result.
+- Stream incremental output to the caller via onUpdate as it arrives.
+- Handle non-zero exit codes and spawn errors gracefully — return an isError result, never throw.
+- Add brief doc comments.
+
+Output only the complete TypeScript file, no explanation.

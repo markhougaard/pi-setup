@@ -1,0 +1,96 @@
+```typescript
+import { ExtensionAPI, ExtensionContext, AgentToolResult, Type } from "@earendil-works/pi-sdk";
+import { spawn } from "child_process";
+import { Static } from "@sinclair/typebox";
+
+/**
+ * Registers a tool that spawns an isolated Pi instance to perform a subtask.
+ */
+export default async function (pi: ExtensionAPI) {
+  const params = Type.Object({
+    task: Type.String(),
+    systemPrompt: Type.Optional(Type.String()),
+  });
+
+  pi.registerTool({
+    name: "subagent",
+    description: "Delegates a task to a fresh, isolated Pi instance.",
+    parameters: params,
+    execute: async (
+      toolCallId,
+      params: Static<typeof params>,
+      signal,
+      onUpdate,
+      ctx
+    ): Promise<AgentToolResult> => {
+      const { task, systemPrompt } = Params;
+      
+      // Determine the command and arguments.
+      // If systemPrompt is provided, we use the --system-prompt flag if supported, 
+      // otherwise we prepend it to the task.
+      let command = "pi";
+      let args: string[] = ["--print", `"${task}"`];
+
+      if (systemPrompt) {
+        // Assuming --system-prompt is a valid flag for the pi CLI.
+        // If not, we prepend it to the task string.
+        args.splice(1, 0, "--system-prompt", `"${systemPrompt}"`);
+      }
+
+      return new Promise((resolve) => {
+        const child = spawn(command, args, {
+          shell: true,
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, NODE_UNINTERVALLED: "1" },
+        });
+
+        const cleanup = () => {
+          if (!child.killed) {
+            child.kill("SIGTERM");
+          }
+        };
+
+        // Handle stdout
+        child.stdout.on("data", (data) => {
+          const chunk = data.toString();
+          if (onUpdate) {
+            onUpdate({ content: chunk });
+          }
+        });
+
+        // Handle stderr
+        child.stderr.on("data", (data) => {
+          const chunk = data.toString();
+          if (onUpdate) {
+            onUpdate({ content: `[stderr] ${chunk}` });
+          }
+        });
+
+        // Handle errors/exit
+        child.on("error", (err) => {
+          resolve({ content: `Failed to spawn subagent: ${err.message}`, isError: true });
+        });
+
+        child.on("close", (code) => {
+          cleanup();
+          if (code === 0) {
+            resolve({ content: "Subagent completed successfully." });
+          } else {
+            resolve({ content: `Subagent exited with code ${code}`, isError: true });
+          }
+        });
+
+        // Handle AbortSignal
+        const abortHandler = () => {
+          cleanup();
+          resolve({ content: "Subagent task was aborted by the caller.", isError: true });
+        };
+
+        if (signal) {
+          signal.addEventListener("abort", abortHandler);
+        }
+      });
+    },
+  });
+}
+```

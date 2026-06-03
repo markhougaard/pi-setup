@@ -1,0 +1,77 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type, Static, TSchema } from "@sinclair/typebox";
+import { spawn } from "node:child_process";
+
+/**
+ * Registers a `subagent` tool that runs a Pi command in a fresh isolated instance.
+ * The tool accepts a task string and an optional system prompt. It spawns the
+ * `pi` CLI in non‑interactive mode, streams stdout to the caller via onUpdate,
+ * and returns the final output. Abort signals are respected.
+ */
+export default async function (pi: ExtensionAPI) {
+  const paramsSchema = Type.Object({
+    task: Type.String(),
+    systemPrompt: Type.Optional(Type.String()),
+  });
+
+  pi.registerTool({
+    name: "subagent",
+    description: "Run a Pi task in a fresh isolated instance and return its output.",
+    parameters: paramsSchema,
+    async execute(
+      toolCallId,
+      params: Static<typeof paramsSchema>,
+      signal,
+      onUpdate,
+      ctx: ExtensionContext,
+    ) {
+      const { task, systemPrompt } = params;
+      const args: string[] = [];
+      if (systemPrompt) {
+        args.push("--system-prompt", systemPrompt);
+      }
+      args.push("--print", task);
+
+      let output = "";
+      let aborted = false;
+
+      const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+
+      const handleData = (data: Buffer) => {
+        const text = data.toString();
+        output += text;
+        if (onUpdate) onUpdate(text);
+      };
+
+      child.stdout.on("data", handleData);
+      child.stderr.on("data", handleData);
+
+      const onAbort = () => {
+        aborted = true;
+        child.kill();
+      };
+      if (signal) signal.addEventListener("abort", onAbort);
+
+      try {
+        const exitCode = await new Promise<number>((resolve, reject) => {
+          child.on("error", reject);
+          child.on("close", resolve);
+        });
+        if (signal) signal.removeEventListener("abort", onAbort);
+        if (aborted) {
+          return { content: "Execution aborted", isError: true };
+        }
+        if (exitCode !== 0) {
+          return {
+            content: `Subagent exited with code ${exitCode}\n${output}`,
+            isError: true,
+          };
+        }
+        return { content };
+      } catch (e: any) {
+        if (signal) signal.removeEventListener("abort", onAbort);
+        return { content: `Spawn error: ${e.message ?? e}`, isError: true };
+      }
+    },
+  });
+}
