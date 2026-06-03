@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  One-shot agent: publishes NODE_EXTRA_CA_CERTS into the user's launchd session
+	  at login so pi/Node trusts the mkcert CA the local TLS llama-server presents.
+	  Without this, `pi` against https://127.0.0.1:8080 fails with `Connection error`.
+	  Terminals (and thus pi) launched after login inherit the value; run
+	  `launchctl getenv NODE_EXTRA_CA_CERTS` to confirm.
+	-->
+	<key>Label</key>
+	<string>com.markhougaard.node-ca-env</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/launchctl</string>
+		<string>setenv</string>
+		<string>NODE_EXTRA_CA_CERTS</string>
+		<string>/Users/markhougaard/Library/Application Support/mkcert/rootCA.pem</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>

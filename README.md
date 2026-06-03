@@ -240,11 +240,16 @@ the pick on this box.
   build that understands `gemma4uv` lands, if you ever want vision.
 - **The server speaks TLS; clients must trust the mkcert CA.** The live `llama-server`
   runs with `--ssl-cert-file`/`--ssl-key-file` (mkcert `localhost+2`), so `curl` needs
-  `-k` and **pi/Node needs the CA** or it dies with `Connection error`:
+  `-k` and **pi/Node needs the CA** or it dies with `Connection error`. The
+  `com.markhougaard.node-ca-env` LaunchAgent publishes it into the launchd session at
+  login so new terminals (and pi) inherit it:
   ```bash
-  export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/mkcert/rootCA.pem"
+  cp launchagents/com.markhougaard.node-ca-env.plist ~/Library/LaunchAgents/
+  launchctl load -w ~/Library/LaunchAgents/com.markhougaard.node-ca-env.plist
+  launchctl getenv NODE_EXTRA_CA_CERTS   # → …/mkcert/rootCA.pem
   ```
-  Add that to your shell profile (or pi's launch env) so `pi` can reach `:8080`.
+  It runs `launchctl setenv NODE_EXTRA_CA_CERTS <mkcert rootCA>`. Already-open
+  terminals need a restart to inherit it; `curl` still needs `-k` either way.
 
 ## Layout
 
@@ -254,6 +259,7 @@ launchdaemons/
 launchagents/
   com.markhougaard.llama-server.plist        # gpt-oss-20b autostart at login
   com.markhougaard.llama-server-gemma.plist  # gemma-4-12b alternate (A/B; same :8080)
+  com.markhougaard.node-ca-env.plist         # publishes NODE_EXTRA_CA_CERTS (mkcert CA) for pi/Node
 bin/
   llm-swap                                    # switch the active model + pi defaultModel
 pi/
