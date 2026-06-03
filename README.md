@@ -216,6 +216,36 @@ its log) and whether the tool round-trip completes:
 pi --print "Read README.md with the read tool and tell me only the first heading."
 ```
 
+### Results (M1 Pro / 16 GB, 2026-06-03)
+
+| Model | Decode | Prompt eval | Tool-call round-trip¹ | Resident weights |
+|---|---|---|---|---|
+| **gpt-oss-20b** (MoE, ~3.6B active) | **34.4 tok/s** | 148.9 tok/s | **41 s** | ~14 GB |
+| Gemma 4 12B (dense, UD-Q4_K_XL) | 12.1 tok/s | 17.5 tok/s | 158 s | ~7.4 GB |
+
+¹ `pi --print` read-tool round-trip above. **Both models complete the tool call
+correctly** (return `# pi-setup`) — so Gemma 4's tool calling works through pi over
+llama.cpp `--jinja`. But the prediction held: the dense 12B decodes **~2.8× slower**
+than the MoE and is **~3.9× slower end-to-end** (its thinking mode adds reasoning
+tokens to every turn). Gemma's only win here is the ~7 GB lighter footprint — spend it
+on `--swa-full` if you adopt it. For latency-sensitive agent loops, gpt-oss-20b stays
+the pick on this box.
+
+### Two gotchas found while wiring it up
+
+- **`--no-mmproj` is required.** `-hf` auto-downloads Gemma 4's vision projector, but
+  this llama.cpp build doesn't know its type (`unknown projector type: gemma4uv`) and
+  *refuses to start* — KeepAlive then crash-loops it. The gemma plist passes
+  `--no-mmproj` to skip it (we want text-only for coding anyway). Drop the flag once a
+  build that understands `gemma4uv` lands, if you ever want vision.
+- **The server speaks TLS; clients must trust the mkcert CA.** The live `llama-server`
+  runs with `--ssl-cert-file`/`--ssl-key-file` (mkcert `localhost+2`), so `curl` needs
+  `-k` and **pi/Node needs the CA** or it dies with `Connection error`:
+  ```bash
+  export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/mkcert/rootCA.pem"
+  ```
+  Add that to your shell profile (or pi's launch env) so `pi` can reach `:8080`.
+
 ## Layout
 
 ```

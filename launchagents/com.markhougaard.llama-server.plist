@@ -30,6 +30,10 @@
 		<string>8080</string>
 		<string>-ngl</string>
 		<string>99</string>
+		<string>--ssl-cert-file</string>
+		<string>/Users/markhougaard/.config/llama-tls/localhost+2.pem</string>
+		<string>--ssl-key-file</string>
+		<string>/Users/markhougaard/.config/llama-tls/localhost+2-key.pem</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

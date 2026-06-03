@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default async function (pi: ExtensionAPI) {
   pi.registerProvider("llama-cpp", {
-    baseUrl: "http://127.0.0.1:8080/v1",
+    baseUrl: "https://127.0.0.1:8080/v1",
     apiKey: "none",
     api: "openai-completions",
     // Only ONE of these is actually being served on :8080 at a time — see

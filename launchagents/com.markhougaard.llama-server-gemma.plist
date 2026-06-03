@@ -9,6 +9,10 @@
 		<string>/opt/homebrew/bin/llama-server</string>
 		<string>-hf</string>
 		<string>unsloth/gemma-4-12b-it-GGUF:UD-Q4_K_XL</string>
+		<!-- Gemma 4's vision projector (gemma4uv) is unknown to this llama.cpp
+		     build; -hf auto-pulls it and refuses to start. Text-only is all we
+		     want for coding, so skip the mmproj entirely. -->
+		<string>--no-mmproj</string>
 		<string>--jinja</string>
 		<string>--ctx-size</string>
 		<string>32768</string>
@@ -30,6 +34,10 @@
 		<string>8080</string>
 		<string>-ngl</string>
 		<string>99</string>
+		<string>--ssl-cert-file</string>
+		<string>/Users/markhougaard/.config/llama-tls/localhost+2.pem</string>
+		<string>--ssl-key-file</string>
+		<string>/Users/markhougaard/.config/llama-tls/localhost+2-key.pem</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
