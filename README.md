@@ -133,16 +133,22 @@ returns the line, tool-calls are working through the full Harmony round-trip.
 - **Context window**: set to **32768** (32K) in both `llama-server` (`--ctx-size`) and
   the pi extension (`contextWindow`). Verified holding a 26K-token context with no spill
   and no OOM.
-- **`--swa-full` is *not* set — headroom beats prefix reuse on 16 GB.** gpt-oss-20b uses
-  sliding-window attention (128-token window on alternating layers). `--swa-full` would
-  keep full-length KV on every layer so the cross-turn prefix is reused (sub-second
-  follow-up prefills instead of a full re-process), but it roughly doubles KV memory. On
-  a 16 GB box with `iogpu.wired_limit_mb=14336`, that extra KV is the difference between
-  the rest of the machine being usable while a turn runs and not. Without it, every agent
-  turn re-prefills the growing conversation (`llama-server` logs `forcing full prompt
-  re-processing due to lack of cache data`), which is the cost we're paying for keeping
-  ~2 GB more free for the OS. **Trade-off:** on a 32 GB+ machine, or if you mostly do
-  single-shot prompts where prefill speed doesn't matter, add `--swa-full` back.
+- **`--swa-full` is *not* set — and you get prefix reuse anyway.** gpt-oss-20b uses
+  sliding-window attention (128-token window on alternating layers). `--swa-full` keeps
+  full-length KV on every layer (so the whole cross-turn prefix is reusable) but roughly
+  doubles KV memory — on a 16 GB box with `iogpu.wired_limit_mb=14336` that extra KV is
+  the difference between the rest of the machine staying usable during a turn and not.
+  **An earlier version of this note claimed that without `--swa-full` every agent turn
+  re-prefills the whole growing conversation. That is no longer true** — current
+  `llama.cpp` reuses the conversation prefix across turns via warm-slot prefix matching
+  and SWA *context checkpoints* (`llama-server` logs `created/restored context
+  checkpoint`), so follow-up turns only prefill the new tokens. Measured here
+  (2026-06-03, gpt-oss-20b, this config): a follow-up request on a **7,463-token**
+  context prefilled only **17 tokens** (0.2%) — see `bin/prefill-probe`. So you keep the
+  ~2 GB of headroom *and* get fast follow-ups; there's no longer a prefill reason to add
+  `--swa-full` back. Two caveats: the reuse is lost if `llama-server` restarts (cold
+  prefill on the next turn), and for very long contexts the checkpoint delta grows as the
+  sliding window advances.
 - **Process priority — keep the foreground responsive during generation.** The
   LaunchAgent runs `llama-server` with `ProcessType=Adaptive`, `Nice=5`, and
   `LowPriorityIO=true`. That tells macOS to yield CPU and disk I/O to whatever you're
@@ -297,6 +303,7 @@ launchagents/
 bin/
   llm-swap                                    # switch the active model + pi defaultModel
   ab-eval                                     # run eval/prompts through the served model
+  prefill-probe                               # verify cross-turn prefix reuse (prefill tokens)
 eval/
   prompts/                                    # one .txt per eval task
   results/<model>/                            # timed pi --print outputs per model

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""prefill-probe — verify cross-turn prefix reuse on the local llama-server.
+
+Sends two requests that share a large prefix: a cold turn A (unique ~7K-token
+block, so it must be prefilled in full) and a follow-up turn B that appends a
+short question. Reads llama-server's own "prompt eval time = … / N tokens" log
+line to report how many tokens each turn actually prefilled. If B prefills only
+the delta, the conversation prefix is being reused across turns (warm-slot
+prefix match / SWA context checkpoints) and there is no per-turn re-prefill cost.
+
+Usage: bin/prefill-probe        (server must be up on https://127.0.0.1:8080)
+"""
+import json, os, re, ssl, time, urllib.request
+
+LOG = os.path.expanduser("~/.llama-cpp/logs/server.log")
+URL = "https://127.0.0.1:8080/v1/models"
+CHAT = "https://127.0.0.1:8080/v1/chat/completions"
+CTX = ssl._create_unverified_context()  # local mkcert self-signed cert
+
+
+def served_model():
+    r = urllib.request.urlopen(URL, context=CTX, timeout=30)
+    return json.loads(r.read())["data"][0]["id"]
+
+
+def prefilled_since(pos):
+    with open(LOG, "rb") as f:
+        f.seek(pos)
+        new = f.read().decode("utf-8", "replace")
+    m = re.findall(r"prompt eval time =\s*[\d.]+ ms /\s*(\d+) tokens", new)
+    cp = len(re.findall(r"restored context checkpoint", new))
+    return (int(m[-1]) if m else None), cp
+
+
+def chat(model, messages, max_tokens=16):
+    body = json.dumps({"model": model, "messages": messages,
+                       "max_tokens": max_tokens, "temperature": 0,
+                       "stream": False}).encode()
+    req = urllib.request.Request(CHAT, data=body,
+                                 headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, context=CTX, timeout=600).read())
+
+
+def main():
+    model = served_model()
+    print(f"served model: {model}")
+    uniq = str(time.time())
+    big = "\n".join(f"{i}. unique-{uniq} filler line about prefix caching number {i}"
+                    for i in range(320))
+    a = [{"role": "system", "content": "You are concise."},
+         {"role": "user", "content": big + "\n\nReply with exactly the word OK."}]
+
+    pos = os.path.getsize(LOG)
+    ra = chat(model, a)
+    pa, cpa = prefilled_since(pos)
+    print(f"TURN A  context={ra['usage']['prompt_tokens']:>6}  prefilled={pa}  checkpoints={cpa}")
+
+    b = a + [{"role": "assistant", "content": ra["choices"][0]["message"]["content"]},
+             {"role": "user", "content": "Now reply with exactly the word DONE."}]
+    time.sleep(1)
+    pos = os.path.getsize(LOG)
+    rb = chat(model, b)
+    pb, cpb = prefilled_since(pos)
+    ctxn = rb["usage"]["prompt_tokens"]
+    print(f"TURN B  context={ctxn:>6}  prefilled={pb}  checkpoints={cpb}")
+
+    if pa and pb is not None:
+        ratio = pb / ctxn
+        verdict = "REUSE WORKS" if ratio < 0.2 else "NO REUSE — full re-prefill each turn"
+        print(f"\n{verdict}: turn B reused the prefix, prefilling {pb}/{ctxn} "
+              f"tokens ({ratio*100:.1f}%).")
+
+
+if __name__ == "__main__":
+    main()
