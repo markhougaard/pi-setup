@@ -168,16 +168,67 @@ returns the line, tool-calls are working through the full Harmony round-trip.
 - **First-load time**: cold ~3 s after the model is on disk; the download is the slow
   part (one-time).
 
+## A/B: gpt-oss-20b vs Gemma 4 12B
+
+A second LaunchAgent serves [`unsloth/gemma-4-12b-it-GGUF`](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF)
+(UD-Q4_K_XL, 7.37 GB) on the same `:8080`, so you can swap the two and benchmark
+on identical server flags. **Why it's worth testing, and what to actually watch:**
+
+- **Don't expect it to be faster.** gpt-oss-20b is a *Mixture-of-Experts* model —
+  ~21B total but only **~3.6B active** per token, which is why it hits ~43 tok/s.
+  Gemma 4 12B is **dense**: all ~12B activate every token, so despite the smaller
+  file it moves ~3× more weight per token and will likely generate **slower**.
+  "Smaller GGUF" ≠ "faster decode" once one side is MoE.
+- **Its real edge is RAM.** At ~7.4 GB resident it's roughly half gpt-oss's ~14 GB.
+  That freed headroom is what makes the dense penalty potentially worth it — enough
+  to turn `--swa-full` back on (cross-turn prefix reuse, dropped above to save ~2 GB)
+  or widen the KV budget. The swap script keeps flags identical for a clean
+  model-vs-model first pass; add `--swa-full` to the gemma plist as a *second* experiment.
+- **256K context is not free.** The model card advertises 256K, but context costs
+  KV-cache RAM — your binding constraint. Both agents stay at 32K so the comparison
+  is fair and fits the box.
+- **Judge on tok/s + tool-call reliability**, not vibes. Gemma 4 has native function
+  calling and a real system role; whether llama.cpp's bundled template parses its
+  `tool_calls` cleanly under `--jinja` is the thing the A/B is really for. Watch the
+  `-fa on` + hybrid-attention combo on Apple Silicon — if you see assertion failures
+  or garbage, that's the first knob to flip.
+
+One-time install of the second agent + swap helper:
+
+```bash
+cp launchagents/com.markhougaard.llama-server-gemma.plist ~/Library/LaunchAgents/
+sudo install -m 755 bin/llm-swap /usr/local/bin/llm-swap   # or add ./bin to PATH
+```
+
+Then flip between them (each swap stops the other server, starts the target, points
+pi's `defaultModel` at it, and waits for `/health`):
+
+```bash
+llm-swap gemma      # serve Gemma 4 12B
+llm-swap gpt-oss    # back to gpt-oss-20b
+llm-swap status     # what's loaded + served model + health
+```
+
+Benchmark each with the same prompt and compare tok/s (printed by `llama-server` in
+its log) and whether the tool round-trip completes:
+
+```bash
+pi --print "Read README.md with the read tool and tell me only the first heading."
+```
+
 ## Layout
 
 ```
 launchdaemons/
   com.markhougaard.iogpu-wired-limit.plist   # persistent sysctl (system-level, sudo)
 launchagents/
-  com.markhougaard.llama-server.plist        # llama-server autostart at login
+  com.markhougaard.llama-server.plist        # gpt-oss-20b autostart at login
+  com.markhougaard.llama-server-gemma.plist  # gemma-4-12b alternate (A/B; same :8080)
+bin/
+  llm-swap                                    # switch the active model + pi defaultModel
 pi/
   extensions/
-    llama-cpp.ts                              # registers llama-cpp provider in pi
+    llama-cpp.ts                              # registers llama-cpp provider (both models)
   settings.json                               # defaultProvider=llama-cpp, defaultModel=...
 ```
 

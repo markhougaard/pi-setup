@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.markhougaard.llama-server-gemma</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/llama-server</string>
+		<string>-hf</string>
+		<string>unsloth/gemma-4-12b-it-GGUF:UD-Q4_K_XL</string>
+		<string>--jinja</string>
+		<string>--ctx-size</string>
+		<string>32768</string>
+		<string>--parallel</string>
+		<string>1</string>
+		<string>--cache-type-k</string>
+		<string>q8_0</string>
+		<string>--cache-type-v</string>
+		<string>q8_0</string>
+		<string>-fa</string>
+		<string>on</string>
+		<string>--batch-size</string>
+		<string>1024</string>
+		<string>--cache-ram</string>
+		<string>0</string>
+		<string>--host</string>
+		<string>127.0.0.1</string>
+		<string>--port</string>
+		<string>8080</string>
+		<string>-ngl</string>
+		<string>99</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Adaptive</string>
+	<key>Nice</key>
+	<integer>5</integer>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/markhougaard/.llama-cpp/logs/server-gemma.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/markhougaard/.llama-cpp/logs/server-gemma.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/markhougaard</string>
+</dict>
+</plist>
